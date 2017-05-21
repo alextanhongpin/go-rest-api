@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -33,15 +34,17 @@ type Job struct {
 
 var env Enviroment
 
-func main() {
+var cfg = flag.String("config", "config.json", "Path to a config file.")
 
+func main() {
+	flag.Parse()
 	// Setup Config
-	pathToConfig := os.Getenv("CONFIG")
-	os.Unsetenv("CONFIG")
-	if pathToConfig == "" {
-		pathToConfig = "config.json"
-	}
-	loadConfig(pathToConfig)
+	// pathToConfig := os.Getenv("CONFIG")
+	// os.Unsetenv("CONFIG")
+	// if pathToConfig == "" {
+	// 	pathToConfig = "config.json"
+	// }
+	loadConfig(*cfg)
 
 	// Setup database
 	setupDB()
