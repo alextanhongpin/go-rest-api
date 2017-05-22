@@ -10,8 +10,8 @@ import (
 	"os"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
-	"github.com/julienschmidt/httprouter"
+	_ "github.com/alextanhongpin/simple-api/Godeps/_workspace/src/github.com/go-sql-driver/mysql"
+	"github.com/alextanhongpin/simple-api/Godeps/_workspace/src/github.com/julienschmidt/httprouter"
 )
 
 type (
