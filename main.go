@@ -39,15 +39,77 @@ type (
 // Global env
 var env Env
 
-// Flags
-var (
-	// go run main.go -port=4000 will set server to listen to the port *:4000
-	port = flag.Int("port", 8080, "The server port.")
-	// go run main.go -cfg=dev.json will load the config from the dev.json
-	cfg = flag.String("config", "config.json", "Path to a config file.")
-)
+type Service interface {
+	fetchMany() ([]Job, error)
+	fetchOne(string) (Job, error)
+	create(Job) error
+	update(string, Job) error
+	delete(string) error
+}
+
+type JobService struct {
+	DB *sql.DB
+}
+
+func (js JobService) fetchMany() ([]Job, error) {
+	var jobs []Job
+	rows, err := js.DB.Query("SELECT id, name, created_at FROM job")
+	defer rows.Close()
+	if err != nil {
+		return jobs, err
+	}
+
+	for rows.Next() {
+		var job Job
+		err := rows.Scan(&job.ID, &job.Name, &job.CreatedAt)
+		if err != nil {
+			return jobs, err
+		}
+		jobs = append(jobs, job)
+	}
+
+	if err = rows.Err(); err != nil {
+		return jobs, err
+	}
+	return jobs, nil
+}
+
+func (js JobService) fetchOne(id string) (Job, error) {
+	var job Job
+	err := env.DB.QueryRow("SELECT id, name, created_at FROM job WHERE id=?", id).Scan(&job.ID, &job.Name, &job.CreatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return job, nil
+
+		} else {
+			return job, err
+		}
+	}
+	return job, nil
+}
+
+func (js JobService) update(id string, job Job) error {
+	_, err = env.DB.Exec("UPDATE job SET name=? WHERE id=?", job.Name, id)
+	return err
+}
+
+func (js JobService) delete(id string) error {
+	_, err := env.DB.Exec("DELETE FROM job WHERE id = ?", id)
+	return err
+}
+
+func (js JobService) create(job Job) error {
+	_, err = env.DB.Exec("INSERT INTO job (name) values(?)", job.Name)
+	return err
+}
 
 func main() {
+	// Flags
+	var (
+		// go run main.go -port=4000 -config=config.json
+		port = flag.Int("port", 8080, "The server port.")
+		cfg  = flag.String("config", "config.json", "Path to a config file.")
+	)
 	flag.Parse()
 
 	// Load the config from the json file from the path specified
@@ -60,107 +122,95 @@ func main() {
 	// Setup router
 	router := httprouter.New()
 
+	// Define a new service. Use dependency injection.
+	jobsvc := JobService{DB: env.DB}
+
 	// Setup routes
-	router.GET("/api/jobs", getJobsHandler)
-	router.GET("/api/jobs/:id", getJobHandler)
-	router.POST("/api/jobs", createJobHandler)
-	router.DELETE("/api/jobs/:id", deleteJobHandler)
-	router.PUT("/api/jobs/:id", updateJobHandler)
+	router.GET("/api/jobs", getJobsHandler(jobsvc))
+	router.GET("/api/jobs/:id", getJobHandler(jobSvc))
+	router.POST("/api/jobs", createJobHandler(jobsvc))
+	router.DELETE("/api/jobs/:id", deleteJobHandler(jobsvc))
+	router.PUT("/api/jobs/:id", updateJobHandler(jobsvc))
 
 	// Start server
 	fmt.Printf("listening to port *:%d. press ctrl + c to cancel", *port)
 	http.ListenAndServe(fmt.Sprintf(":%d", *port), router)
 }
 
-// Get a list of job
-func getJobsHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	rows, err := env.DB.Query("SELECT id, name, created_at FROM job")
-	defer rows.Close()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	var jobs []Job
-	for rows.Next() {
-		var job Job
-		err := rows.Scan(&job.ID, &job.Name, &job.CreatedAt)
+func getJobsHandler(svc Service) httprouter.Handle {
+	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		jobs, err := svc.fetchMany()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
-
 		}
-		jobs = append(jobs, job)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(jobs)
 	}
-	if err = rows.Err(); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(jobs)
 }
 
 // Get a job based on the specified id
-func getJobHandler(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-	id := ps.ByName("id")
+func getJobHandler(svc Service) httprouter.Handle {
+	return func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+		id := ps.ByName("id")
+		job, err := svc.fetchOne(id)
 
-	var job Job
-	err := env.DB.QueryRow("SELECT id, name, created_at FROM job WHERE id=?", id).Scan(&job.ID, &job.Name, &job.CreatedAt)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			fmt.Fprint(w, `{"data": null }`)
-			return
-		} else {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(job)
+	}
+}
+func updateJobHandler(svc Service) httprouter.Handle {
+	return func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+		id := ps.ByName("id")
+
+		var job Job
+		err := json.NewDecoder(r.Body).Decode(&job)
+		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-	}
+		err = svc.update(id, job)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(job)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+func deleteJobHandler(svc JobService) httprouter.Handle {
+	return func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+		id := ps.ByName("id")
+
+		err := svc.delete(id)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNoContent)
+	}
 }
 
-func updateJobHandler(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-	id := ps.ByName("id")
+func createJobHandler(svc JobService) httprouter.Handle {
+	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		var job Job
+		err := json.NewDecoder(r.Body).Decode(&job)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 
-	var job Job
-	err := json.NewDecoder(r.Body).Decode(&job)
-
-	_, err = env.DB.Exec("UPDATE job SET name=? WHERE id=?", job.Name, id)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+		err = svc.create(job)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNoContent)
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func deleteJobHandler(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-	id := ps.ByName("id")
-
-	_, err := env.DB.Exec("DELETE FROM job WHERE id = ?", id)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func createJobHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	var job Job
-	err := json.NewDecoder(r.Body).Decode(&job)
-
-	_, err = env.DB.Exec("INSERT INTO job (name) values(?)", job.Name)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNoContent)
 }
 
 // setupConfig takes a pointer reference and set the config loaded
