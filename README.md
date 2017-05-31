@@ -14,8 +14,9 @@ $ docker run --rm -it -v "$GOPATH":/gopath -v "$(pwd)":/app -e "GOPATH=/gopath" 
 ## Run Docker MySql
 
 ```bash
-$ docker --rm docker run --name some-mysql -it -p 3306:3306 -e MYSQL_ROOT_PASSWORD=123456 -d mysql
+$ docker run --rm --name demo-mysql -it -p 3306:3306 -e MYSQL_ROOT_PASSWORD=123456 -d mysql
 ```
+
 
 ```bash
 $ docker exec -it some-mysql bash
