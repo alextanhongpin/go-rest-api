@@ -21,3 +21,9 @@ $ docker run --rm --name demo-mysql -it -p 3306:3306 -e MYSQL_ROOT_PASSWORD=1234
 ```bash
 $ docker exec -it some-mysql bash
 ```
+
+## Running a local example without docker
+
+```bash
+$ go run main.backup.go
+```
