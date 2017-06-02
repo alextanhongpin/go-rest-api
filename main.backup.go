@@ -158,7 +158,7 @@ func createJobHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Param
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNoContent)
+	w.WriteHeader(http.StatusCreated)
 }
 
 // setupConfig takes a pointer reference and set the config loaded
